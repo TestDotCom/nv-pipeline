@@ -1,4 +1,4 @@
-name: CI
+name: CI pipeline
 
 on:
   push:
@@ -10,7 +10,9 @@ on:
 
 env:
   GHCR: ghcr.io
-  SNAPSHOT: ${{ github.repository }}
+  ACR_LOGIN_SERVER: testdotcom.azurecr.io
+
+  IMAGE: ${{ github.repository }}
 
 jobs:
   build:
@@ -33,7 +35,7 @@ jobs:
       id: gh-meta
       uses: docker/metadata-action@59bc9ddfd5a31eb6f5b55e89b65578fe3bbba85e
       with:
-        images: ${{ env.GHCR }}/${{ env.SNAPSHOT }}
+        images: ${{ env.GHCR }}/${{ env.IMAGE }}
     
     - name: Snapshot build and push
       uses: docker/build-push-action@e27bcee4eb9e7b4bc168418e3364c4482120393a
@@ -41,3 +43,30 @@ jobs:
         push: true
         tags: ${{ steps.gh-meta.outputs.tags }}
         labels: ${{ steps.gh-meta.outputs.labels }}
+    
+    - name: Run NeuVector scan
+      run: |
+        curl -kH "Content-Type: application/json" \
+          -d '{"password": {"username": "'${{ secrets.NV_USERNAME }}'", "password": "'${{ secrets.NV_PASSWORD }}'"}}' \
+          "${{ secrets.NV_ENDPOINT }}/v1/auth" > /dev/null 2>&1 > token.json
+        
+        TOKEN=`cat token.json | jq -r '.token.token'`
+        
+        curl -kH "Content-Type: application/json" -H "X-Auth-Token: $TOKEN" \
+          -d '{"request": {"registry": "https://${{ env.GH_REGISTRY }}", "tag": "main", "repository": "${{ env.IMAGE }}"}}' \
+          "${{ secrets.NV_ENDPOINT }}/v1/scan/repository"
+        
+        curl -kX 'DELETE' -H "Content-Type: application/json" -H "X-Auth-Token: $TOKEN" \
+          "${{ secrets.NV_ENDPOINT }}/v1/auth" > /dev/null 2>&1
+    
+    - uses: docker/login-action@21f251affc0769ccac8a1cf17e937592fb492337
+      with:
+        registry: ${{ env.ACR_LOGIN_SERVER }}
+        username: ${{ secrets.ACR_USERNAME }}
+        password: ${{ secrets.ACR_PASSWORD }}
+  
+    - name: Release image push
+      uses: akhilerm/tag-push-action@v2.0.0
+      with:
+        src: ${{ steps.gh-meta.outputs.tags }}
+        dst: ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE }}:latest

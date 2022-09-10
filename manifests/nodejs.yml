@@ -1,0 +1,28 @@
+kind: Namespace
+apiVersion: v1
+metadata:
+  name: neuvector-evaluation
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nodejs
+  namespace: neuvector-evaluation
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nodejs
+  template:
+    metadata:
+      labels:
+        app: nodejs
+    spec:
+      containers:
+        - name: nodejs
+          image: keypartner.azurecr.io/keypartner/neuvector-evaluation:latest
+          ports:
+            - containerPort: 8888
+          imagePullPolicy: Always
+      imagePullSecrets:
+        - name: acr-secret

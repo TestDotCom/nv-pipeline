@@ -1,50 +1,39 @@
 name: CI pipeline
-
 on:
   push:
     branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-
   workflow_dispatch:
-
 env:
-  GHCR: ghcr.io
+  REGISTRY: ghcr.io
   SNAPSHOT: ${{ github.repository }}
-  
-  ACR_LOGIN_SERVER: testdotcom.azurecr.io
   RELEASE: "testdotcom/nv-pipeline:latest"
-
 jobs:
   build:
-    runs-on: ubuntu-22.04
-
+    runs-on: ubuntu-latest
     steps:
+    - name: Checkout
+      uses: actions/checkout@v4
     - name: Setup Docker Buildx
-      uses: docker/setup-buildx-action@bea6a01aa40b4d58b0382d47e1c4a70137af67b1
+      uses: docker/setup-buildx-action@v3
       with:
         buildkitd-flags: --debug
-    
     - name: Login Github registry
-      uses: docker/login-action@21f251affc0769ccac8a1cf17e937592fb492337
+      uses: docker/login-action@v3
       with:
-        registry: ${{ env.GHCR }}
+        registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
-    
     - name: Extract Github image metadata
       id: gh-meta
-      uses: docker/metadata-action@59bc9ddfd5a31eb6f5b55e89b65578fe3bbba85e
+      uses: docker/metadata-action@v5
       with:
-        images: ${{ env.GHCR }}/${{ env.SNAPSHOT }}
-    
+        images: ${{ env.REGISTRY }}/${{ env.SNAPSHOT }}
     - name: Snapshot build and push
-      uses: docker/build-push-action@e27bcee4eb9e7b4bc168418e3364c4482120393a
+      uses: docker/build-push-action@v5
       with:
         push: true
         tags: ${{ steps.gh-meta.outputs.tags }}
         labels: ${{ steps.gh-meta.outputs.labels }}
-    
     - name: Run NeuVector scan
       run: |
         curl -kH "Content-Type: application/json" \
@@ -54,20 +43,18 @@ jobs:
         TOKEN=`cat token.json | jq -r '.token.token'`
         
         curl -kH "Content-Type: application/json" -H "X-Auth-Token: $TOKEN" \
-          -d '{"request": {"registry": "https://${{ env.GH_REGISTRY }}", "tag": "main", "repository": "${{ env.SNAPSHOT }}"}}' \
+          -d '{"request": {"registry": "https://${{ env.REGISTRY }}", "tag": "main", "repository": "${{ env.SNAPSHOT }}"}}' \
           "${{ secrets.NV_ENDPOINT }}/v1/scan/repository"
         
         curl -kX 'DELETE' -H "Content-Type: application/json" -H "X-Auth-Token: $TOKEN" \
           "${{ secrets.NV_ENDPOINT }}/v1/auth" > /dev/null 2>&1
-    
-    - uses: docker/login-action@21f251affc0769ccac8a1cf17e937592fb492337
+    - name: Login to DockerHub
+      uses: docker/login-action@v3
       with:
-        registry: ${{ env.ACR_LOGIN_SERVER }}
-        username: ${{ secrets.ACR_USERNAME }}
-        password: ${{ secrets.ACR_PASSWORD }}
-  
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
     - name: Release image push
-      uses: akhilerm/tag-push-action@v2.0.0
+      uses: akhilerm/tag-push-action@v2.2.0
       with:
         src: ${{ steps.gh-meta.outputs.tags }}
         dst: ${{ env.ACR_LOGIN_SERVER }}/${{ env.RELEASE }}
